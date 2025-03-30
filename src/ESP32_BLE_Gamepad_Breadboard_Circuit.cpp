@@ -18,6 +18,8 @@
 
 #include <BleGamepad.h>
 #include "sbus.h"
+#include <esp_now.h>
+#include <WiFi.h>
 
 SBUS x8r(Serial2);
 // bfs::SbusRx sbus_rx(&Serial2, 8, 9, true, false);
@@ -26,6 +28,9 @@ SBUS x8r(Serial2);
 uint16_t channels[16];
 bool failSafe;
 bool lostFrame;
+
+#define SBUS_ON_PIN 1     // LOW indicates sbus, HIGH indicates joystick
+#define ESPNOW_MODE_PIN 3 // LOW indicates esp-now, HIGH indicates bluetooth
 
 // ABXY BUTTONS
 #define X_BUTTON 23        // A
@@ -102,12 +107,38 @@ void joysticksHandlerForPC(uint16_t leftVrx, uint16_t leftVry, uint16_t rightVrx
   bleGamepad.setRX(rightVryJoystickValue);
 }
 
+/////////////////  esp now start ///////////
+uint8_t broadcastAddress[] = {0x54, 0x32, 0x04, 0x3d, 0xd4, 0x0c};
+
+// Structure example to send data
+// Must match the receiver structure
+typedef struct struct_message
+{
+  uint16_t throttle;
+  uint16_t rudder;
+  uint16_t elevator;
+  uint16_t aileron;
+  uint16_t mode;
+  uint16_t panic;
+} struct_message;
+
+// Create a struct_message called myData
+struct_message espNowData;
+esp_now_peer_info_t peerInfo;
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+{
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+/////////////////  esp now end ///////////
 void setup()
 {
   // put your setup code here, to run once:
   delay(500);
   Serial.begin(115200);
   pinMode(1, INPUT_PULLUP);
+  pinMode(ESPNOW_MODE_PIN, INPUT_PULLUP);
   x8r.begin(8, 9, true, 100000);
   // sbus_rx.Begin();
 
@@ -115,13 +146,36 @@ void setup()
   // {
   //   pinMode(buttonsPins[i], INPUT_PULLUP);
   // }
+  int transmitMode = digitalRead(ESPNOW_MODE_PIN);
+  if (transmitMode == LOW)
+  {
+    WiFi.mode(WIFI_STA);
 
-  bleGamepadConfig.setAutoReport(false);
-  bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD); // CONTROLLER_TYPE_JOYSTICK, CONTROLLER_TYPE_GAMEPAD (DEFAULT), CONTROLLER_TYPE_MULTI_AXIS
-  bleGamepadConfig.setVid(0xe502);
-  bleGamepadConfig.setPid(0xabcd);
-  bleGamepadConfig.setHatSwitchCount(4);
-  bleGamepad.begin(&bleGamepadConfig);
+    // Init ESP-NOW
+    if (esp_now_init() != ESP_OK)
+    {
+      Serial.println("Error initializing ESP-NOW");
+      return;
+    }
+    esp_now_register_send_cb(OnDataSent);
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+      Serial.println("Failed to add peer");
+      return;
+    }
+  }
+  else
+  {
+    bleGamepadConfig.setAutoReport(false);
+    bleGamepadConfig.setControllerType(CONTROLLER_TYPE_GAMEPAD); // CONTROLLER_TYPE_JOYSTICK, CONTROLLER_TYPE_GAMEPAD (DEFAULT), CONTROLLER_TYPE_MULTI_AXIS
+    bleGamepadConfig.setVid(0xe502);
+    bleGamepadConfig.setPid(0xabcd);
+    bleGamepadConfig.setHatSwitchCount(4);
+    bleGamepad.begin(&bleGamepadConfig);
+  }
 }
 
 void loop()
@@ -182,22 +236,23 @@ void loop()
   // }
 
   // put your main code here, to run repeatedly:
+  if (digitalRead(SBUS_ON_PIN) != LOW)
+  {
+    // Joysticks lecture
+    leftVrxJoystickLecture = analogRead(LEFT_VRX_JOYSTICK);
+    leftVryJoystickLecture = analogRead(LEFT_VRY_JOYSTICK);
+    rightVrxJoystickLecture = analogRead(RIGHT_VRX_JOYSTICK);
+    rightVryJoystickLecture = analogRead(RIGHT_VRY_JOYSTICK);
+    // printf("Setting duty cycle to %d%%\n", leftVrxJoystickLecture);
+    // Compute joysticks value
+    leftVrxJoystickValue = map(leftVrxJoystickLecture, 4095, 0, 0, 32737);
+    leftVryJoystickValue = map(leftVryJoystickLecture, 0, 4095, 0, 32737);
+    rightVrxJoystickValue = map(rightVrxJoystickLecture, 4095, 0, 0, 32737);
+    rightVryJoystickValue = map(rightVryJoystickLecture, 0, 4095, 0, 32737);
+  }
+
   if (bleGamepad.isConnected())
   {
-    if (!digitalRead(1))
-    {
-      // Joysticks lecture
-      leftVrxJoystickLecture = analogRead(LEFT_VRX_JOYSTICK);
-      leftVryJoystickLecture = analogRead(LEFT_VRY_JOYSTICK);
-      rightVrxJoystickLecture = analogRead(RIGHT_VRX_JOYSTICK);
-      rightVryJoystickLecture = analogRead(RIGHT_VRY_JOYSTICK);
-      // printf("Setting duty cycle to %d%%\n", leftVrxJoystickLecture);
-      // Compute joysticks value
-      leftVrxJoystickValue = map(leftVrxJoystickLecture, 4095, 0, 0, 32737);
-      leftVryJoystickValue = map(leftVryJoystickLecture, 0, 4095, 0, 32737);
-      rightVrxJoystickValue = map(rightVrxJoystickLecture, 4095, 0, 0, 32737);
-      rightVryJoystickValue = map(rightVryJoystickLecture, 0, 4095, 0, 32737);
-    }
     switch (gamepadMode)
     {
     case ANDROID:
@@ -247,5 +302,25 @@ void loop()
     }
 
     bleGamepad.sendReport();
+  }
+
+  if (digitalRead(ESPNOW_MODE_PIN) == LOW)
+  {
+
+    espNowData.throttle = leftVryJoystickValue;
+    espNowData.rudder = rightVrxJoystickValue;
+    espNowData.elevator = leftVrxJoystickValue;
+    espNowData.aileron = rightVryJoystickValue;
+    espNowData.mode = 0;
+    espNowData.panic = 0;
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&espNowData, sizeof(espNowData));
+    if (result == ESP_OK)
+    {
+      Serial.println("Sent with success");
+    }
+    else
+    {
+      Serial.println("Error sending the data");
+    }
   }
 }
