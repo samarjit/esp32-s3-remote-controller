@@ -198,12 +198,12 @@ void loop()
   // }
   if (x8r.read(&channels[0], &failSafe, &lostFrame))
   {
-    printf("   ");
-    for (int8_t i = 15; i >= 10; i--)
-    {
-      printf(" %u", channels[i]);
-    }
-    printf("\n");
+    // printf("   ");
+    // for (int8_t i = 15; i >= 10; i--)
+    // {
+    //   printf(" %u", channels[i]);
+    // }
+    // printf("\n");
 
     leftVrxJoystickLecture = channels[13];
     leftVryJoystickLecture = channels[10];
@@ -236,19 +236,19 @@ void loop()
   // }
 
   // put your main code here, to run repeatedly:
-  if (digitalRead(SBUS_ON_PIN) != LOW)
+  if (digitalRead(SBUS_ON_PIN) == HIGH) // high joystick
   {
     // Joysticks lecture
     leftVrxJoystickLecture = analogRead(LEFT_VRX_JOYSTICK);
     leftVryJoystickLecture = analogRead(LEFT_VRY_JOYSTICK);
     rightVrxJoystickLecture = analogRead(RIGHT_VRX_JOYSTICK);
     rightVryJoystickLecture = analogRead(RIGHT_VRY_JOYSTICK);
-    // printf("Setting duty cycle to %d%%\n", leftVrxJoystickLecture);
+    printf("Setting duty cycle to %d %d %d %d \n", leftVrxJoystickLecture, leftVryJoystickLecture, rightVrxJoystickLecture, rightVryJoystickLecture);
     // Compute joysticks value
     leftVrxJoystickValue = map(leftVrxJoystickLecture, 4095, 0, 0, 32737);
-    leftVryJoystickValue = map(leftVryJoystickLecture, 0, 4095, 0, 32737);
+    leftVryJoystickValue = map(leftVryJoystickLecture, 4095, 0 , 0, 32737);
     rightVrxJoystickValue = map(rightVrxJoystickLecture, 4095, 0, 0, 32737);
-    rightVryJoystickValue = map(rightVryJoystickLecture, 0, 4095, 0, 32737);
+    rightVryJoystickValue = map(rightVryJoystickLecture, 4095, 0, 0, 32737);
   }
 
   if (bleGamepad.isConnected())
@@ -308,9 +308,9 @@ void loop()
   {
 
     espNowData.throttle = leftVryJoystickValue;
-    espNowData.rudder = rightVrxJoystickValue;
-    espNowData.elevator = leftVrxJoystickValue;
-    espNowData.aileron = rightVryJoystickValue;
+    espNowData.rudder = leftVrxJoystickValue;
+    espNowData.elevator = rightVryJoystickValue;
+    espNowData.aileron = rightVrxJoystickValue;
     espNowData.mode = 0;
     espNowData.panic = 0;
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&espNowData, sizeof(espNowData));
