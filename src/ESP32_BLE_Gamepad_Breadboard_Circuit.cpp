@@ -17,13 +17,16 @@
 #include <BleOutputReceiver.h>
 
 #include <BleGamepad.h>
-#include "sbus.h"
+// #include "sbus.h"
 #include <esp_now.h>
 #include <WiFi.h>
+#include "Defines.h"
+#include "Sbus_Rx.h"
 
-SBUS x8r(Serial2);
-// bfs::SbusRx sbus_rx(&Serial2, 8, 9, true, false);
-// bfs::SbusData data;
+
+//SBUS x8r(Serial2);
+//// bfs::SbusRx sbus_rx(&Serial2, 8, 9, true, false);
+//// bfs::SbusData data;
 
 uint16_t channels[16];
 bool failSafe;
@@ -46,7 +49,7 @@ bool lostFrame;
 
 // MENU BUTTONS
 #define START_BUTTON 0
-#define SELECT_BUTTON 0
+#define SELECT_BUTTON 1
 #define PS_BUTTON 0
 
 // JOYSTICKS BUTTONS
@@ -139,7 +142,9 @@ void setup()
   Serial.begin(115200);
   pinMode(1, INPUT_PULLUP);
   pinMode(ESPNOW_MODE_PIN, INPUT_PULLUP);
-  x8r.begin(8, 9, true, 100000);
+  // x8r.begin(8, 9, true, 100000);
+  initSbusRx();
+
   // sbus_rx.Begin();
 
   // for (int i = 0; i < NUM_BUTTONS; i++)
@@ -182,6 +187,20 @@ void loop()
 {
   // printf("loop\n");
   delay(1);
+  getSbus();
+
+  Sbus_Data rxData = getSbusData();
+    //// Plainflight Display the received data 
+    for (uint8_t i = 0; i < 16; i++) 
+    {
+      printf("%d", rxData.ch[i]);
+      printf("\t");
+    }
+    // Display lost frames and failsafe data 
+    printf("%d", rxData.lost_frame);
+    printf("\t");
+    printf("%d \n", rxData.failsafe);
+  //// end Plainflight
   // if (sbus_rx.Read())
   // {
   //   printf("loop\n");
@@ -196,14 +215,17 @@ void loop()
   //   printf("\t");
   //   printf("%d\n", data.failsafe);
   // }
+  ////// end sbus_rx 
+
+  /* old working code
   if (x8r.read(&channels[0], &failSafe, &lostFrame))
   {
-    // printf("   ");
-    // for (int8_t i = 15; i >= 10; i--)
-    // {
-    //   printf(" %u", channels[i]);
-    // }
-    // printf("\n");
+    printf("   ");
+    for (int8_t i = 15; i >= 10; i--)
+    {
+      printf(" %u", channels[i]);
+    }
+    printf("\n");
 
     leftVrxJoystickLecture = channels[13];
     leftVryJoystickLecture = channels[10];
@@ -215,7 +237,7 @@ void loop()
     rightVrxJoystickValue = map(rightVrxJoystickLecture, 240, 1615, 0, 32737);
     rightVryJoystickValue = map(rightVryJoystickLecture, 280, 1650, 0, 32737);
     // neopixelWriter.setPixelColor(0, leftVrxJoystickLecture, 0, 0);
-  }
+  }*/
 
   // if (x8r.read(&channels[1], &failSafe, &lostFrame))
   // {
