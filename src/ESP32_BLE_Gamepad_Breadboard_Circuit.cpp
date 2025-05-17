@@ -35,6 +35,12 @@ bool lostFrame;
 #define SBUS_ON_PIN 1     // LOW indicates sbus, HIGH indicates joystick
 #define ESPNOW_MODE_PIN 3 // LOW indicates esp-now, HIGH indicates bluetooth
 
+volatile byte buttonReleased = false;
+bool isDrone = true; // airplane false, drone true
+void buttonReleasedInterrupt() {
+  buttonReleased = true;
+}
+
 // ABXY BUTTONS
 #define X_BUTTON 23        // A
 #define CIRCLE_BUTTON 22   // B
@@ -55,6 +61,7 @@ bool lostFrame;
 // JOYSTICKS BUTTONS
 #define R3_BUTTON 0
 #define L3_BUTTON 0
+#define BUTTON_RIGHT_JY_PIN 9
 
 // JOYSTICKS
 #define LEFT_VRX_JOYSTICK 4
@@ -111,8 +118,9 @@ void joysticksHandlerForPC(uint16_t leftVrx, uint16_t leftVry, uint16_t rightVrx
 }
 
 /////////////////  esp now start ///////////
-uint8_t broadcastAddress[] = {0x54, 0x32, 0x04, 0x3d, 0xd4, 0x0c};
-
+uint8_t broadcastAddressAirplane[] = {0x54, 0x32, 0x04, 0x3d, 0xd4, 0x0c}; // Airplane
+uint8_t broadcastAddressDrone[] = {0x9c, 0x9e, 0x6e, 0x43, 0x84, 0xe4}; // drone
+uint8_t broadcastAddress[]  = {0x9c, 0x9e, 0x6e, 0x43, 0x84, 0xe4};
 // Structure example to send data
 // Must match the receiver structure
 typedef struct struct_message
@@ -130,6 +138,10 @@ struct_message espNowData;
 esp_now_peer_info_t peerInfo;
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+  Serial.print(macStr);
   Serial.print("\r\nLast Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
@@ -144,7 +156,10 @@ void setup()
   pinMode(ESPNOW_MODE_PIN, INPUT_PULLUP);
   // x8r.begin(8, 9, true, 100000);
   initSbusRx();
-
+  pinMode(BUTTON_RIGHT_JY_PIN, INPUT_PULLUP);
+  // attachInterrupt(digitalPinToInterrupt(BUTTON_RIGHT_JY_PIN),
+  //                 buttonReleasedInterrupt,
+  //                 FALLING);
   // sbus_rx.Begin();
 
   // for (int i = 0; i < NUM_BUTTONS; i++)
@@ -168,7 +183,13 @@ void setup()
     peerInfo.encrypt = false;
     if (esp_now_add_peer(&peerInfo) != ESP_OK)
     {
-      Serial.println("Failed to add peer");
+      Serial.println("Failed to add peer drone");
+      return;
+    }
+    memcpy(peerInfo.peer_addr, broadcastAddressAirplane, 6);
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+      Serial.println("Failed to add peer airplane");
       return;
     }
   }
@@ -186,20 +207,52 @@ void setup()
 void loop()
 {
   // printf("loop\n");
-  delay(1);
+  
   getSbus();
+  delay(30);
 
-  Sbus_Data rxData = getSbusData();
-    //// Plainflight Display the received data 
-    for (uint8_t i = 0; i < 16; i++) 
+  if (buttonReleased) {
+    buttonReleased = false;
+    if (isDrone)
     {
-      printf("%d", rxData.ch[i]);
-      printf("\t");
+      isDrone = false; 
+      digitalWrite(LED_BUILTIN, HIGH);
+      printf("Airplane mode\n");
+      // neopixelWriter.setPixelColor(100, 0, 0, 0);
     }
-    // Display lost frames and failsafe data 
-    printf("%d", rxData.lost_frame);
-    printf("\t");
-    printf("%d \n", rxData.failsafe);
+    else
+    {
+      isDrone = true;
+      printf("Drone mode\n");
+      digitalWrite(LED_BUILTIN, LOW);
+      // neopixelWriter.setPixelColor(100, 100, 0, 0);
+    }
+  }
+  Sbus_Data rxData = getSbusData();
+    if (digitalRead(SBUS_ON_PIN) == LOW)  { // sbus on
+      //// Plainflight Display the received data 
+      for (uint8_t i = 0; i < 16; i++) 
+      {
+        printf("%d", rxData.ch[i]);
+        printf("\t");
+      }
+      /// Display lost frames and failsafe data 
+      printf("%d", rxData.lost_frame);
+      printf("\t");
+      printf("%d \n", rxData.failsafe);
+    }
+    if (!rxData.failsafe)
+    {
+      leftVrxJoystickLecture = rxData.ch[3];
+      leftVryJoystickLecture = rxData.ch[0];
+      rightVrxJoystickLecture = rxData.ch[1];
+      rightVryJoystickLecture = rxData.ch[2];
+      // map(long x, long in_min, long in_max, long out_min, long out_max)
+      leftVrxJoystickValue = map(leftVrxJoystickLecture, 335, 1706, 0, 32737);
+      leftVryJoystickValue = map(leftVryJoystickLecture, 335, 1706, 0, 32737);
+      rightVrxJoystickValue = map(rightVrxJoystickLecture, 240, 1615, 0, 32737);
+      rightVryJoystickValue = map(rightVryJoystickLecture, 280, 1650, 0, 32737);
+    }
   //// end Plainflight
   // if (sbus_rx.Read())
   // {
@@ -265,7 +318,7 @@ void loop()
     leftVryJoystickLecture = analogRead(LEFT_VRY_JOYSTICK);
     rightVrxJoystickLecture = analogRead(RIGHT_VRX_JOYSTICK);
     rightVryJoystickLecture = analogRead(RIGHT_VRY_JOYSTICK);
-    printf("Setting duty cycle to %d %d %d %d \n", leftVrxJoystickLecture, leftVryJoystickLecture, rightVrxJoystickLecture, rightVryJoystickLecture);
+    printf("Joystick values to %d %d %d %d \n", leftVrxJoystickLecture, leftVryJoystickLecture, rightVrxJoystickLecture, rightVryJoystickLecture);
     // Compute joysticks value
     leftVrxJoystickValue = map(leftVrxJoystickLecture, 4095, 0, 0, 32737);
     leftVryJoystickValue = map(leftVryJoystickLecture, 4095, 0 , 0, 32737);

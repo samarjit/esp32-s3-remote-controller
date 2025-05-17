@@ -35,9 +35,9 @@
 #define HEADER_LEN      1
 #define FOOTER_LEN      1
 #define NUM_SBUS_CH     06
-#define HEADER          0xFF
+#define HEADER          0x0F
 #define FOOTER          0x00
-#define FOOTER2         0x04
+#define FOOTER2         0x00
 #define CH17_MASK       0x01
 #define CH18_MASK       0x02
 #define LOST_FRAME_MASK 0x04
