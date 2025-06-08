@@ -22,7 +22,7 @@
 #include <WiFi.h>
 #include "Defines.h"
 #include "Sbus_Rx.h"
-
+#include <HTTPClient.h>
 
 //SBUS x8r(Serial2);
 //// bfs::SbusRx sbus_rx(&Serial2, 8, 9, true, false);
@@ -61,7 +61,8 @@ void buttonReleasedInterrupt() {
 // JOYSTICKS BUTTONS
 #define R3_BUTTON 0
 #define L3_BUTTON 0
-#define BUTTON_RIGHT_JY_PIN 9
+#define BUTTON_RIGHT_JY_PIN 2
+#define BUTTON_LEFT_JY_PIN 9
 
 // JOYSTICKS
 #define LEFT_VRX_JOYSTICK 4
@@ -116,6 +117,45 @@ void joysticksHandlerForPC(uint16_t leftVrx, uint16_t leftVry, uint16_t rightVrx
   bleGamepad.setZ(rightVrxJoystickValue);
   bleGamepad.setRX(rightVryJoystickValue);
 }
+/////////////// wifi client start ///////////
+const char* ssid = "BELL413";
+const char* password = "2AE9F24CC3E9";
+const char* receiver_ip = "192.168.2.47";
+void initWifiClient() {
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected!");
+}
+void wifiSendClient() {
+   String url = "http://" + String(receiver_ip) + "/setjoystickvalues?";
+  url += "leftX=" + String(leftVrxJoystickValue);
+  url += "&leftY=" + String(leftVryJoystickValue);
+  url += "&rightX=" + String(rightVrxJoystickValue);
+  url += "&rightY=" + String(rightVryJoystickValue);
+  if (digitalRead(BUTTON_LEFT_JY_PIN) == LOW) {
+    url += "&calibrate=true";
+    digitalWrite(LED_BUILTIN, HIGH);
+  } else {
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  printf("url: %s\n", url.c_str());
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode > 0) {
+    String payload = http.getString();
+    Serial.println("Response: " + payload);
+  } else {
+    Serial.println("HTTP Request failed");
+  }
+  http.end();
+}
+                                       
+/////////////// wifi client end ///////////
 
 /////////////////  esp now start ///////////
 uint8_t broadcastAddressAirplane[] = {0x54, 0x32, 0x04, 0x3d, 0xd4, 0x0c}; // Airplane
@@ -141,9 +181,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
   char macStr[18];
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-  Serial.print(macStr);
-  Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  printf("%s\r\nLast Packet Send Status:\t%s\n", macStr, status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 /////////////////  esp now end ///////////
@@ -156,6 +194,7 @@ void setup()
   pinMode(ESPNOW_MODE_PIN, INPUT_PULLUP);
   // x8r.begin(8, 9, true, 100000);
   initSbusRx();
+  pinMode(BUTTON_LEFT_JY_PIN, INPUT_PULLUP);
   pinMode(BUTTON_RIGHT_JY_PIN, INPUT_PULLUP);
   // attachInterrupt(digitalPinToInterrupt(BUTTON_RIGHT_JY_PIN),
   //                 buttonReleasedInterrupt,
@@ -178,9 +217,9 @@ void setup()
       return;
     }
     esp_now_register_send_cb(OnDataSent);
-    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
     if (esp_now_add_peer(&peerInfo) != ESP_OK)
     {
       Serial.println("Failed to add peer drone");
@@ -192,6 +231,7 @@ void setup()
       Serial.println("Failed to add peer airplane");
       return;
     }
+    initWifiClient();
   }
   else
   {
@@ -209,7 +249,7 @@ void loop()
   // printf("loop\n");
   
   getSbus();
-  delay(30);
+  delay(100);
 
   if (buttonReleased) {
     buttonReleased = false;
@@ -397,5 +437,17 @@ void loop()
     {
       Serial.println("Error sending the data");
     }
+    result = esp_now_send(broadcastAddressAirplane, (uint8_t *)&espNowData, sizeof(espNowData));
+    if (result == ESP_OK)
+    {
+      Serial.println("Sent with success");
+    }
+    else
+    {
+      Serial.println("Error sending the data");
+    }
+
+
+    wifiSendClient();
   }
 }
